@@ -1,0 +1,137 @@
+# WebTunnel Configuration Example
+# Copy this file to .webtunnel.yaml and adjust values as needed
+
+# Server configuration
+server:
+  host: "0.0.0.0"
+  port: 8443
+  tls: true
+  cert_file: "./certs/server.crt"
+  key_file: "./certs/server.key"
+  static_dir: "./web/dist"
+  
+  # CORS settings
+  cors:
+    allowed_origins:
+      - "http://localhost:3000"
+      - "http://localhost:8080"
+      - "https://yourdomain.com"
+
+# Database configuration (PostgreSQL)
+database:
+  url: "postgres://webtunnel:password@localhost:5432/webtunnel?sslmode=disable"
+  max_connections: 25
+  max_idle_connections: 5
+  connection_max_lifetime: "1h"
+
+# Redis configuration
+redis:
+  url: "redis://localhost:6379"
+  password: ""
+  db: 0
+  pool_size: 10
+
+# Authentication settings
+auth:
+  jwt_secret: "your-super-secret-jwt-key-change-this"
+  session_expiry: "24h"
+  refresh_expiry: "168h" # 7 days
+  bcrypt_cost: 10
+
+# Session management
+session:
+  max_sessions: 50
+  max_sessions_per_user: 5
+  session_timeout: "30m"
+  working_directory: "/tmp/webtunnel"
+  
+  # Security settings
+  blocked_commands:
+    - "rm -rf /"
+    - "sudo"
+    - "dd"
+    - "mkfs"
+    - "shutdown"
+    - "reboot"
+  
+  allowed_shells:
+    - "/bin/bash"
+    - "/bin/zsh"
+    - "/bin/sh"
+  
+  # Resource limits
+  resource_limits:
+    max_cpu_percent: 50
+    max_memory_mb: 512
+    max_disk_io_mb_per_sec: 10
+
+# Logging configuration
+logging:
+  level: "info" # debug, info, warn, error
+  format: "json" # json or console
+  output: "stdout" # stdout, stderr, or file path
+  
+  # File rotation (if output is a file)
+  max_size_mb: 100
+  max_age_days: 30
+  max_backups: 10
+
+# Monitoring and metrics
+monitoring:
+  enabled: true
+  prometheus:
+    enabled: true
+    path: "/metrics"
+    port: 9090
+  
+  health_check:
+    path: "/health"
+    detailed: true
+
+# Feature flags
+features:
+  file_transfer: true
+  session_sharing: true
+  session_recording: false
+  multi_factor_auth: false
+  
+# Rate limiting
+rate_limit:
+  enabled: true
+  requests_per_minute: 60
+  burst_size: 10
+  
+  # Per-endpoint limits
+  endpoints:
+    "/api/v1/auth/login":
+      requests_per_minute: 5
+      burst_size: 2
+    "/api/v1/sessions":
+      requests_per_minute: 30
+      burst_size: 5
+
+# External integrations
+integrations:
+  slack:
+    enabled: false
+    webhook_url: "https://hooks.slack.com/services/YOUR/WEBHOOK/URL"
+    
+  github:
+    enabled: false
+    client_id: "your-github-client-id"
+    client_secret: "your-github-client-secret"
+    
+  ldap:
+    enabled: false
+    url: "ldap://ldap.example.com:389"
+    bind_dn: "cn=admin,dc=example,dc=com"
+    bind_password: "password"
+    user_base: "ou=users,dc=example,dc=com"
+    user_filter: "(uid={username})"
+
+# Development settings (ignored in production)
+development:
+  debug: true
+  auto_reload: true
+  mock_auth: false
+  disable_rate_limit: true

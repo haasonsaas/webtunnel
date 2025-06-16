@@ -1,0 +1,130 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.21'
+
+    - name: Cache Go modules
+      uses: actions/cache@v3
+      with:
+        path: ~/go/pkg/mod
+        key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+        restore-keys: |
+          ${{ runner.os }}-go-
+
+    - name: Install dependencies
+      run: go mod download
+
+    - name: Run tests
+      run: go test -v ./...
+
+    - name: Run linter
+      uses: golangci/golangci-lint-action@v3
+      with:
+        version: latest
+        args: --timeout 5m
+
+    - name: Build binaries
+      run: |
+        make build-main
+        make build-local
+        make build-demo
+
+  build-and-release:
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: test
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+          - goos: linux
+            goarch: arm64
+          - goos: darwin
+            goarch: amd64
+          - goos: darwin
+            goarch: arm64
+          - goos: windows
+            goarch: amd64
+    
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.21'
+
+    - name: Build binary
+      env:
+        GOOS: ${{ matrix.goos }}
+        GOARCH: ${{ matrix.goarch }}
+      run: |
+        mkdir -p dist
+        BINARY_NAME="webtunnel-local-${{ matrix.goos }}-${{ matrix.goarch }}"
+        if [ "${{ matrix.goos }}" = "windows" ]; then
+          BINARY_NAME="${BINARY_NAME}.exe"
+        fi
+        go build -ldflags "-X main.version=${GITHUB_REF_NAME} -w -s" \
+          -o "dist/${BINARY_NAME}" ./cmd/webtunnel-local
+
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v3
+      with:
+        name: binaries
+        path: dist/
+
+  create-release:
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: build-and-release
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Download artifacts
+      uses: actions/download-artifact@v3
+      with:
+        name: binaries
+        path: dist/
+
+    - name: Create Release
+      uses: softprops/action-gh-release@v1
+      with:
+        files: dist/*
+        draft: false
+        prerelease: false
+        generate_release_notes: true
+        body: |
+          ## 🌐 WebTunnel Release
+          
+          ### Installation
+          
+          Download the appropriate binary for your platform and run:
+          ```bash
+          chmod +x webtunnel-local-*
+          ./webtunnel-local-*
+          ```
+          
+          Then open http://127.0.0.1:8081 in your browser.
+          
+          ### What's included
+          - Real terminal sessions with PTY integration
+          - WebSocket streaming
+          - No external dependencies required
+          - Cross-platform support
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

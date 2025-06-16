@@ -104,6 +104,15 @@ func main() {
 				sessions.POST("/:id/input", sessHandler.SendInput)
 				sessions.GET("/:id/stream", sessHandler.Stream) // Real WebSocket streaming!
 			}
+
+			// File management routes
+			files := protected.Group("/files")
+			{
+				fileHandler := handlers.NewFile(logger)
+				files.GET("/browse", fileHandler.Browse)
+				files.POST("/upload/:session_id", fileHandler.Upload)
+				files.GET("/download", fileHandler.Download)
+			}
 		}
 	}
 

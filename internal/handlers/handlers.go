@@ -1,7 +1,13 @@
 package handlers
 
 import (
+	"fmt"
+	"io"
 	"net/http"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
@@ -228,22 +234,125 @@ func (h *FileHandler) Browse(c *gin.Context) {
 		path = "/tmp"
 	}
 
-	// Simple file browser implementation
+	// Security check - prevent directory traversal
+	if strings.Contains(path, "..") {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid path"})
+		return
+	}
+
+	// Read directory
+	entries, err := os.ReadDir(path)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to read directory"})
+		return
+	}
+
+	var files []gin.H
+	for _, entry := range entries {
+		info, err := entry.Info()
+		if err != nil {
+			continue
+		}
+
+		fileType := "file"
+		if entry.IsDir() {
+			fileType = "directory"
+		}
+
+		files = append(files, gin.H{
+			"name": entry.Name(),
+			"type": fileType,
+			"size": info.Size(),
+			"modified": info.ModTime().Format(time.RFC3339),
+			"permissions": info.Mode().String(),
+		})
+	}
+
 	c.JSON(http.StatusOK, gin.H{
 		"path": path,
-		"files": []gin.H{
-			{"name": "example.txt", "type": "file", "size": 1024},
-			{"name": "folder", "type": "directory", "size": 0},
-		},
+		"files": files,
 	})
 }
 
 func (h *FileHandler) Upload(c *gin.Context) {
-	c.JSON(http.StatusNotImplemented, gin.H{"error": "Upload not implemented yet"})
+	sessionID := c.Param("session_id")
+	if sessionID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Session ID required"})
+		return
+	}
+
+	file, header, err := c.Request.FormFile("file")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Failed to get file"})
+		return
+	}
+	defer file.Close()
+
+	targetPath := c.PostForm("path")
+	if targetPath == "" {
+		targetPath = "/tmp/" + header.Filename
+	}
+
+	// Create target file
+	dst, err := os.Create(targetPath)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create file"})
+		return
+	}
+	defer dst.Close()
+
+	// Copy file content
+	written, err := io.Copy(dst, file)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save file"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "File uploaded successfully",
+		"path": targetPath,
+		"size": written,
+	})
 }
 
 func (h *FileHandler) Download(c *gin.Context) {
-	c.JSON(http.StatusNotImplemented, gin.H{"error": "Download not implemented yet"})
+	filePath := c.Query("path")
+	if filePath == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "File path required"})
+		return
+	}
+
+	// Security check - prevent directory traversal
+	if strings.Contains(filePath, "..") {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid file path"})
+		return
+	}
+
+	// Check if file exists
+	info, err := os.Stat(filePath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "File not found"})
+		} else {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to access file"})
+		}
+		return
+	}
+
+	if info.IsDir() {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Cannot download directory"})
+		return
+	}
+
+	// Set appropriate headers
+	c.Header("Content-Description", "File Transfer")
+	c.Header("Content-Transfer-Encoding", "binary")
+	c.Header("Content-Disposition", "attachment; filename="+filepath.Base(filePath))
+	c.Header("Content-Type", "application/octet-stream")
+	c.Header("Content-Length", fmt.Sprintf("%d", info.Size()))
+
+	// Send file
+	c.File(filePath)
 }
 
 // User handlers
