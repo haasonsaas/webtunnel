@@ -1,0 +1,30 @@
+server:
+  host: "127.0.0.1"
+  port: 8443
+  tls: false  # Disable TLS for testing
+  static_dir: "./web/dist"
+
+database:
+  url: "postgres://localhost/webtunnel_test?sslmode=disable"
+  max_open_conns: 5
+  max_idle_conns: 2
+
+redis:
+  url: "redis://localhost:6379"
+  db: 1  # Use different DB for testing
+
+auth:
+  jwt_secret: "test-secret-key-not-for-production"
+  session_expiry: "24h"
+  rate_limit: 1000  # High limit for testing
+
+session:
+  max_sessions: 10
+  max_memory_mb: 256
+  max_cpu_percent: 50
+  session_timeout: "30m"
+  working_directory: "/tmp/webtunnel-test"
+  blocked_commands: ["rm", "rmdir", "sudo"]
+  environment_vars:
+    TERM: "xterm-256color"
+    SHELL: "/bin/bash"

@@ -1,0 +1,573 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebTunnel - Secure Remote Terminal Access</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #1e1e1e;
+            color: #fff;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        .header {
+            background: #2d2d2d;
+            padding: 1rem;
+            border-bottom: 1px solid #444;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .logo {
+            font-size: 1.5rem;
+            font-weight: bold;
+            color: #00ff88;
+        }
+
+        .auth-section {
+            display: flex;
+            gap: 1rem;
+            align-items: center;
+        }
+
+        .container {
+            display: flex;
+            height: calc(100vh - 70px);
+        }
+
+        .sidebar {
+            width: 300px;
+            background: #252525;
+            border-right: 1px solid #444;
+            padding: 1rem;
+            overflow-y: auto;
+        }
+
+        .main-content {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .terminal {
+            flex: 1;
+            background: #000;
+            padding: 1rem;
+            font-family: 'Courier New', monospace;
+            overflow-y: auto;
+            white-space: pre-wrap;
+        }
+
+        .input-area {
+            background: #2d2d2d;
+            padding: 1rem;
+            border-top: 1px solid #444;
+            display: flex;
+            gap: 1rem;
+        }
+
+        .btn {
+            background: #00ff88;
+            color: #000;
+            border: none;
+            padding: 0.5rem 1rem;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: bold;
+        }
+
+        .btn:hover {
+            background: #00cc6a;
+        }
+
+        .btn-secondary {
+            background: #444;
+            color: #fff;
+        }
+
+        .btn-secondary:hover {
+            background: #555;
+        }
+
+        input, select {
+            background: #444;
+            color: #fff;
+            border: 1px solid #666;
+            padding: 0.5rem;
+            border-radius: 4px;
+        }
+
+        input:focus, select:focus {
+            outline: none;
+            border-color: #00ff88;
+        }
+
+        .session-list {
+            margin-bottom: 2rem;
+        }
+
+        .session-item {
+            background: #333;
+            padding: 1rem;
+            margin-bottom: 0.5rem;
+            border-radius: 4px;
+            cursor: pointer;
+            border-left: 3px solid transparent;
+        }
+
+        .session-item:hover {
+            background: #3a3a3a;
+        }
+
+        .session-item.active {
+            border-left-color: #00ff88;
+            background: #2a4a3a;
+        }
+
+        .session-status {
+            font-size: 0.8rem;
+            color: #888;
+        }
+
+        .login-form {
+            max-width: 400px;
+            margin: 2rem auto;
+            padding: 2rem;
+            background: #2d2d2d;
+            border-radius: 8px;
+            border: 1px solid #444;
+        }
+
+        .form-group {
+            margin-bottom: 1rem;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 0.5rem;
+            color: #ccc;
+        }
+
+        .form-group input {
+            width: 100%;
+        }
+
+        .welcome-text {
+            text-align: center;
+            margin-bottom: 2rem;
+            color: #ccc;
+        }
+
+        .hidden {
+            display: none;
+        }
+
+        .error {
+            color: #ff6b6b;
+            background: #2d1a1a;
+            padding: 1rem;
+            border-radius: 4px;
+            margin-bottom: 1rem;
+            border-left: 3px solid #ff6b6b;
+        }
+
+        .success {
+            color: #00ff88;
+            background: #1a2d1a;
+            padding: 1rem;
+            border-radius: 4px;
+            margin-bottom: 1rem;
+            border-left: 3px solid #00ff88;
+        }
+
+        @media (max-width: 768px) {
+            .container {
+                flex-direction: column;
+            }
+            
+            .sidebar {
+                width: 100%;
+                height: 200px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div class="logo">🌐 WebTunnel</div>
+        <div class="auth-section">
+            <span id="userInfo" class="hidden">Welcome, <span id="username"></span></span>
+            <button id="logoutBtn" class="btn btn-secondary hidden">Logout</button>
+        </div>
+    </div>
+
+    <!-- Login Form -->
+    <div id="loginSection">
+        <div class="login-form">
+            <div class="welcome-text">
+                <h2>Welcome to WebTunnel</h2>
+                <p>Secure remote terminal access inspired by VibeTunnel</p>
+            </div>
+            
+            <div id="loginError" class="error hidden"></div>
+            
+            <form id="loginForm">
+                <div class="form-group">
+                    <label for="email">Email:</label>
+                    <input type="email" id="email" required value="demo@example.com">
+                </div>
+                
+                <div class="form-group">
+                    <label for="password">Password:</label>
+                    <input type="password" id="password" required value="password">
+                </div>
+                
+                <button type="submit" class="btn" style="width: 100%;">Login</button>
+            </form>
+            
+            <div style="margin-top: 1rem; text-align: center; color: #888; font-size: 0.9rem;">
+                Demo credentials: demo@example.com / password
+            </div>
+        </div>
+    </div>
+
+    <!-- Main Application -->
+    <div id="mainApp" class="hidden">
+        <div class="container">
+            <div class="sidebar">
+                <div class="session-list">
+                    <h3>Terminal Sessions</h3>
+                    <div id="sessionList"></div>
+                </div>
+
+                <div>
+                    <h3>Create New Session</h3>
+                    <div style="margin-bottom: 1rem;">
+                        <label for="command">Command:</label>
+                        <input type="text" id="command" placeholder="bash" value="bash">
+                    </div>
+                    
+                    <div style="margin-bottom: 1rem;">
+                        <label for="workingDir">Working Directory:</label>
+                        <input type="text" id="workingDir" placeholder="/tmp">
+                    </div>
+                    
+                    <button id="createSessionBtn" class="btn">Create Session</button>
+                </div>
+            </div>
+
+            <div class="main-content">
+                <div id="terminal" class="terminal">
+                    <div style="color: #00ff88; margin-bottom: 1rem;">
+                        WebTunnel Terminal - Inspired by VibeTunnel
+                        <br>Select or create a session to get started.
+                    </div>
+                </div>
+
+                <div class="input-area">
+                    <input type="text" id="terminalInput" placeholder="Type commands here..." style="flex: 1;" disabled>
+                    <button id="sendBtn" class="btn" disabled>Send</button>
+                    <button id="killSessionBtn" class="btn btn-secondary" disabled>Kill Session</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        class WebTunnelClient {
+            constructor() {
+                this.token = localStorage.getItem('webtunnel_token');
+                this.currentSession = null;
+                this.ws = null;
+                this.init();
+            }
+
+            init() {
+                this.setupEventListeners();
+                if (this.token) {
+                    this.showMainApp();
+                    this.loadSessions();
+                } else {
+                    this.showLogin();
+                }
+            }
+
+            setupEventListeners() {
+                // Login form
+                document.getElementById('loginForm').addEventListener('submit', (e) => {
+                    e.preventDefault();
+                    this.login();
+                });
+
+                // Logout
+                document.getElementById('logoutBtn').addEventListener('click', () => {
+                    this.logout();
+                });
+
+                // Create session
+                document.getElementById('createSessionBtn').addEventListener('click', () => {
+                    this.createSession();
+                });
+
+                // Send input
+                document.getElementById('sendBtn').addEventListener('click', () => {
+                    this.sendInput();
+                });
+
+                // Terminal input enter key
+                document.getElementById('terminalInput').addEventListener('keypress', (e) => {
+                    if (e.key === 'Enter') {
+                        this.sendInput();
+                    }
+                });
+
+                // Kill session
+                document.getElementById('killSessionBtn').addEventListener('click', () => {
+                    this.killSession();
+                });
+            }
+
+            async login() {
+                const email = document.getElementById('email').value;
+                const password = document.getElementById('password').value;
+
+                try {
+                    const response = await fetch('/api/v1/auth/login', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({ email, password })
+                    });
+
+                    const data = await response.json();
+
+                    if (response.ok) {
+                        this.token = data.token;
+                        localStorage.setItem('webtunnel_token', this.token);
+                        document.getElementById('username').textContent = data.user.email;
+                        this.showMainApp();
+                        this.loadSessions();
+                    } else {
+                        this.showError('loginError', data.error || 'Login failed');
+                    }
+                } catch (err) {
+                    this.showError('loginError', 'Network error: ' + err.message);
+                }
+            }
+
+            logout() {
+                this.token = null;
+                localStorage.removeItem('webtunnel_token');
+                if (this.ws) {
+                    this.ws.close();
+                }
+                this.showLogin();
+            }
+
+            async loadSessions() {
+                try {
+                    const response = await this.apiRequest('/api/v1/sessions');
+                    const data = await response.json();
+
+                    if (response.ok) {
+                        this.renderSessions(data.sessions || []);
+                    }
+                } catch (err) {
+                    console.error('Failed to load sessions:', err);
+                }
+            }
+
+            renderSessions(sessions) {
+                const container = document.getElementById('sessionList');
+                container.innerHTML = '';
+
+                sessions.forEach(session => {
+                    const item = document.createElement('div');
+                    item.className = 'session-item';
+                    item.innerHTML = `
+                        <div><strong>${session.command}</strong></div>
+                        <div class="session-status">Status: ${session.status}</div>
+                        <div class="session-status">Created: ${new Date(session.created_at).toLocaleString()}</div>
+                    `;
+                    item.addEventListener('click', () => this.selectSession(session));
+                    container.appendChild(item);
+                });
+            }
+
+            async createSession() {
+                const command = document.getElementById('command').value || 'bash';
+                const workingDir = document.getElementById('workingDir').value || '';
+
+                try {
+                    const response = await this.apiRequest('/api/v1/sessions', {
+                        method: 'POST',
+                        body: JSON.stringify({ command, working_dir: workingDir })
+                    });
+
+                    const session = await response.json();
+
+                    if (response.ok) {
+                        this.loadSessions();
+                        this.selectSession(session);
+                    } else {
+                        alert('Failed to create session: ' + (session.error || 'Unknown error'));
+                    }
+                } catch (err) {
+                    alert('Network error: ' + err.message);
+                }
+            }
+
+            selectSession(session) {
+                // Update UI
+                document.querySelectorAll('.session-item').forEach(item => {
+                    item.classList.remove('active');
+                });
+                event.target.closest('.session-item').classList.add('active');
+
+                this.currentSession = session;
+                document.getElementById('terminalInput').disabled = false;
+                document.getElementById('sendBtn').disabled = false;
+                document.getElementById('killSessionBtn').disabled = false;
+
+                // Connect WebSocket
+                this.connectWebSocket(session.id);
+
+                // Clear terminal
+                document.getElementById('terminal').innerHTML = `
+                    <div style="color: #00ff88;">Connected to session: ${session.command}</div>
+                    <div style="color: #888;">Session ID: ${session.id}</div>
+                    <div style="color: #888;">Working Directory: ${session.working_dir}</div>
+                    <br>
+                `;
+            }
+
+            connectWebSocket(sessionId) {
+                if (this.ws) {
+                    this.ws.close();
+                }
+
+                const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+                const wsUrl = `${protocol}//${window.location.host}/api/v1/sessions/${sessionId}/stream`;
+
+                this.ws = new WebSocket(wsUrl);
+
+                this.ws.onopen = () => {
+                    console.log('WebSocket connected');
+                };
+
+                this.ws.onmessage = (event) => {
+                    const message = JSON.parse(event.data);
+                    if (message.type === 'output') {
+                        this.appendToTerminal(message.data);
+                    }
+                };
+
+                this.ws.onclose = () => {
+                    console.log('WebSocket disconnected');
+                    this.appendToTerminal('\n[WebSocket disconnected]\n');
+                };
+
+                this.ws.onerror = (error) => {
+                    console.error('WebSocket error:', error);
+                    this.appendToTerminal('\n[WebSocket error]\n');
+                };
+            }
+
+            appendToTerminal(text) {
+                const terminal = document.getElementById('terminal');
+                terminal.textContent += text;
+                terminal.scrollTop = terminal.scrollHeight;
+            }
+
+            sendInput() {
+                const input = document.getElementById('terminalInput');
+                const text = input.value;
+
+                if (text && this.ws && this.ws.readyState === WebSocket.OPEN) {
+                    this.ws.send(JSON.stringify({
+                        type: 'input',
+                        data: text + '\n'
+                    }));
+                    input.value = '';
+                }
+            }
+
+            async killSession() {
+                if (!this.currentSession) return;
+
+                try {
+                    const response = await this.apiRequest(`/api/v1/sessions/${this.currentSession.id}`, {
+                        method: 'DELETE'
+                    });
+
+                    if (response.ok) {
+                        if (this.ws) {
+                            this.ws.close();
+                        }
+                        this.currentSession = null;
+                        document.getElementById('terminalInput').disabled = true;
+                        document.getElementById('sendBtn').disabled = true;
+                        document.getElementById('killSessionBtn').disabled = true;
+                        this.loadSessions();
+                        
+                        document.getElementById('terminal').innerHTML = `
+                            <div style="color: #ff6b6b;">Session terminated</div>
+                            <br>
+                        `;
+                    }
+                } catch (err) {
+                    alert('Failed to kill session: ' + err.message);
+                }
+            }
+
+            async apiRequest(url, options = {}) {
+                const defaultOptions = {
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${this.token}`
+                    }
+                };
+
+                return fetch(url, { ...defaultOptions, ...options });
+            }
+
+            showLogin() {
+                document.getElementById('loginSection').classList.remove('hidden');
+                document.getElementById('mainApp').classList.add('hidden');
+                document.getElementById('userInfo').classList.add('hidden');
+                document.getElementById('logoutBtn').classList.add('hidden');
+            }
+
+            showMainApp() {
+                document.getElementById('loginSection').classList.add('hidden');
+                document.getElementById('mainApp').classList.remove('hidden');
+                document.getElementById('userInfo').classList.remove('hidden');
+                document.getElementById('logoutBtn').classList.remove('hidden');
+            }
+
+            showError(elementId, message) {
+                const element = document.getElementById(elementId);
+                element.textContent = message;
+                element.classList.remove('hidden');
+                setTimeout(() => {
+                    element.classList.add('hidden');
+                }, 5000);
+            }
+        }
+
+        // Initialize the application
+        new WebTunnelClient();
+    </script>
+</body>
+</html>
