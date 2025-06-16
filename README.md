@@ -88,39 +88,39 @@ Different tech stack from VibeTunnel's Swift/Rust approach:
 
 ## 🛠️ Getting Started
 
-### Option 1: Demo Mode (Recommended for testing)
+### Option 1: Local Mode with Real Terminals (⭐ RECOMMENDED)
 ```bash
 git clone https://github.com/haasonsaas/webtunnel.git
 cd webtunnel
-make build
-./bin/webtunnel-demo
+make run-local
 ```
-- **No dependencies required**
+- **✅ Real terminal sessions** with bash/zsh
+- **✅ WebSocket streaming** 
+- **✅ No dependencies required**
+- **✅ Full functionality**
+- Access at `http://127.0.0.1:8081`
+
+### Option 2: Demo Mode (for testing UI)
+```bash
+git clone https://github.com/haasonsaas/webtunnel.git
+cd webtunnel
+make run-demo
+```
+- **Mock API endpoints** for UI testing
 - **Instant setup**
-- **Mock API endpoints**
+- **No real terminal functionality**
 - Access at `http://localhost:8080`
 
-### Option 2: Full Stack with Docker
+### Option 3: Full Stack with Docker
 ```bash
 git clone https://github.com/haasonsaas/webtunnel.git
 cd webtunnel
-docker-compose up -d
+make docker
 ```
 - **Complete production setup**
 - **PostgreSQL + Redis included**
 - **Monitoring with Prometheus/Grafana**
 - Access at `https://localhost:8443`
-
-### Option 3: Development Build
-```bash
-git clone https://github.com/haasonsaas/webtunnel.git
-cd webtunnel
-make build
-./bin/webtunnel serve --config .webtunnel.yaml
-```
-- **Native binary**
-- **Custom configuration**
-- **Development mode**
 
 ## 🔧 Configuration
 
@@ -198,29 +198,31 @@ curl -H "Authorization: Bearer <token>" \
 
 ## 🚦 Current Status
 
-### ✅ Implemented
-- ✅ Go backend with Gin framework
-- ✅ JWT authentication system
-- ✅ Web interface with login/session management
-- ✅ Demo mode for testing
-- ✅ Docker deployment configuration
-- ✅ Database schema and migrations
-- ✅ Configuration management
-- ✅ Build system and Makefile
+### ✅ **FULLY WORKING** 
+- ✅ **Real terminal sessions** with PTY integration
+- ✅ **WebSocket streaming** with bidirectional I/O
+- ✅ **Interactive shell access** (bash/zsh/sh)
+- ✅ **Session management** (create/list/delete/cleanup)
+- ✅ **Web interface** with authentication
+- ✅ **Multiple deployment modes** (local/demo/full-stack)
+- ✅ **Go backend** with Gin framework
+- ✅ **JWT authentication** system
+- ✅ **Docker deployment** configuration
+- ✅ **Database schema** and migrations
+- ✅ **Comprehensive Makefile** with all targets
 
 ### 🚧 In Progress
-- 🚧 Real WebSocket terminal streaming
-- 🚧 Actual PTY integration 
-- 🚧 File upload/download
-- 🚧 Session sharing URLs
-- 🚧 Resource monitoring
+- 🚧 File upload/download functionality
+- 🚧 Session sharing URLs with security
+- 🚧 Resource monitoring and limits
+- 🚧 Advanced terminal features (themes, keybindings)
 
-### 📋 Planned
-- 📋 React frontend rebuild
-- 📋 Kubernetes deployment
-- 📋 Session recording/playback
-- 📋 Terminal themes and customization
-- 📋 Multi-user collaboration
+### 📋 Planned Enhancements
+- 📋 React frontend rebuild for better UX
+- 📋 Kubernetes deployment manifests
+- 📋 Session recording/playback (asciinema)
+- 📋 Real-time collaboration features
+- 📋 Advanced security hardening
 
 ## 🤝 Contributing
 
