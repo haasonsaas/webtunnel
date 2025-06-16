@@ -1,8 +1,8 @@
 package terminal
 
 import (
-	"bufio"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -285,14 +285,33 @@ func (s *Service) AttachWebSocket(sessionID string, conn *websocket.Conn) error 
 		return fmt.Errorf("session not found: %s", sessionID)
 	}
 
+	if session.Status != StatusRunning {
+		return fmt.Errorf("session is not running")
+	}
+
 	session.connMu.Lock()
 	session.connections[conn] = true
 	session.connMu.Unlock()
 
+	s.logger.Info("WebSocket attached to session", 
+		zap.String("session_id", sessionID),
+		zap.Int("total_connections", len(session.connections)))
+
+	// Send welcome message
+	welcomeMsg := Message{
+		Type:      "output",
+		Data:      fmt.Sprintf("\r\n🌐 WebTunnel connected to session %s\r\n", sessionID),
+		Timestamp: time.Now(),
+		SessionID: sessionID,
+	}
+	if err := conn.WriteJSON(welcomeMsg); err != nil {
+		s.logger.Error("Failed to send welcome message", zap.Error(err))
+	}
+
 	// Send existing output buffer
 	if buffer := session.outputBuf.Read(); len(buffer) > 0 {
 		msg := Message{
-			Type:      "output",
+			Type:      "output", 
 			Data:      string(buffer),
 			Timestamp: time.Now(),
 			SessionID: sessionID,
@@ -302,38 +321,101 @@ func (s *Service) AttachWebSocket(sessionID string, conn *websocket.Conn) error 
 		}
 	}
 
-	// Handle disconnection
-	go func() {
-		defer func() {
-			session.connMu.Lock()
-			delete(session.connections, conn)
-			session.connMu.Unlock()
-			conn.Close()
-		}()
-
-		for {
-			var msg Message
-			if err := conn.ReadJSON(&msg); err != nil {
-				if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
-					s.logger.Error("WebSocket error", zap.Error(err))
-				}
-				break
-			}
-
-			// Handle different message types
-			switch msg.Type {
-			case "input":
-				if err := s.SendInput(sessionID, []byte(msg.Data)); err != nil {
-					s.logger.Error("Failed to send input", zap.Error(err))
-				}
-			case "resize":
-				// Handle terminal resize
-				// Implementation would parse resize data and call pty.Setsize()
-			}
-		}
-	}()
+	// Handle WebSocket messages in goroutine
+	go s.handleWebSocketMessages(session, conn)
 
 	return nil
+}
+
+func (s *Service) handleWebSocketMessages(session *Session, conn *websocket.Conn) {
+	defer func() {
+		session.connMu.Lock()
+		delete(session.connections, conn)
+		session.connMu.Unlock()
+		conn.Close()
+		s.logger.Info("WebSocket disconnected from session", 
+			zap.String("session_id", session.ID),
+			zap.Int("remaining_connections", len(session.connections)))
+	}()
+
+	// Set connection limits
+	conn.SetReadLimit(512)
+	conn.SetReadDeadline(time.Now().Add(60 * time.Second))
+	conn.SetPongHandler(func(string) error {
+		conn.SetReadDeadline(time.Now().Add(60 * time.Second))
+		return nil
+	})
+
+	for {
+		var msg Message
+		if err := conn.ReadJSON(&msg); err != nil {
+			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
+				s.logger.Error("WebSocket unexpected close", zap.Error(err))
+			} else {
+				s.logger.Debug("WebSocket connection closed", zap.Error(err))
+			}
+			break
+		}
+
+		// Reset read deadline on successful message
+		conn.SetReadDeadline(time.Now().Add(60 * time.Second))
+
+		// Handle different message types
+		switch msg.Type {
+		case "input":
+			if err := s.SendInput(session.ID, []byte(msg.Data)); err != nil {
+				s.logger.Error("Failed to send input to session", 
+					zap.Error(err), 
+					zap.String("session_id", session.ID))
+				
+				// Send error back to client
+				errorMsg := Message{
+					Type:      "error",
+					Data:      fmt.Sprintf("Failed to send input: %v", err),
+					Timestamp: time.Now(),
+					SessionID: session.ID,
+				}
+				conn.WriteJSON(errorMsg)
+			}
+
+		case "resize":
+			// Handle terminal resize
+			var resizeData struct {
+				Cols int `json:"cols"`
+				Rows int `json:"rows"`
+			}
+			if err := json.Unmarshal([]byte(msg.Data), &resizeData); err == nil {
+				if session.pty != nil {
+					if err := pty.Setsize(session.pty, &pty.Winsize{
+						Rows: uint16(resizeData.Rows),
+						Cols: uint16(resizeData.Cols),
+					}); err != nil {
+						s.logger.Error("Failed to resize PTY", zap.Error(err))
+					} else {
+						s.logger.Debug("PTY resized", 
+							zap.Int("cols", resizeData.Cols),
+							zap.Int("rows", resizeData.Rows))
+					}
+				}
+			}
+
+		case "ping":
+			// Respond to ping with pong
+			pongMsg := Message{
+				Type:      "pong",
+				Timestamp: time.Now(),
+				SessionID: session.ID,
+			}
+			if err := conn.WriteJSON(pongMsg); err != nil {
+				s.logger.Error("Failed to send pong", zap.Error(err))
+			}
+
+		default:
+			s.logger.Warn("Unknown message type", 
+				zap.String("type", msg.Type),
+				zap.String("session_id", session.ID))
+		}
+	}
 }
 
 func (s *Service) CleanupStaleSessions() {
@@ -380,16 +462,34 @@ func (s *Service) Shutdown() {
 }
 
 func (s *Service) startProcess(session *Session) error {
-	// Create command
-	session.cmd = exec.CommandContext(session.ctx, "/bin/bash", "-c", session.Command)
-	session.cmd.Dir = session.WorkingDir
+	// Determine the shell and command to run
+	shell := "/bin/bash"
+	if shellEnv := os.Getenv("SHELL"); shellEnv != "" {
+		shell = shellEnv
+	}
+
+	var cmd *exec.Cmd
+	if session.Command == "bash" || session.Command == "sh" || session.Command == "" {
+		// Start interactive shell
+		cmd = exec.CommandContext(session.ctx, shell)
+	} else {
+		// Run specific command in shell
+		cmd = exec.CommandContext(session.ctx, shell, "-c", session.Command)
+	}
+
+	cmd.Dir = session.WorkingDir
 
 	// Set environment variables
 	env := os.Environ()
 	for key, value := range s.config.EnvironmentVars {
 		env = append(env, fmt.Sprintf("%s=%s", key, value))
 	}
-	session.cmd.Env = env
+	// Add session-specific environment
+	env = append(env, fmt.Sprintf("WEBTUNNEL_SESSION_ID=%s", session.ID))
+	env = append(env, fmt.Sprintf("WEBTUNNEL_USER_ID=%s", session.UserID))
+	cmd.Env = env
+
+	session.cmd = cmd
 
 	// Start the command with PTY
 	var err error
@@ -398,8 +498,35 @@ func (s *Service) startProcess(session *Session) error {
 		return fmt.Errorf("failed to start PTY: %w", err)
 	}
 
-	// Start output monitoring
+	// Set initial PTY size
+	if err := pty.Setsize(session.pty, &pty.Winsize{
+		Rows: 24,
+		Cols: 80,
+	}); err != nil {
+		s.logger.Warn("Failed to set initial PTY size", zap.Error(err))
+	}
+
+	s.logger.Info("Started PTY session", 
+		zap.String("session_id", session.ID),
+		zap.String("command", session.Command),
+		zap.String("shell", shell),
+		zap.Int("pid", session.cmd.Process.Pid))
+
+	// Start output monitoring in goroutine
 	go s.monitorOutput(session)
+
+	// Monitor process completion
+	go func() {
+		if err := session.cmd.Wait(); err != nil {
+			s.logger.Info("Session process exited", 
+				zap.String("session_id", session.ID),
+				zap.Error(err))
+		} else {
+			s.logger.Info("Session process completed normally", 
+				zap.String("session_id", session.ID))
+		}
+		session.Status = StatusStopped
+	}()
 
 	return nil
 }
@@ -410,43 +537,65 @@ func (s *Service) monitorOutput(session *Session) {
 			session.pty.Close()
 		}
 		session.Status = StatusStopped
+		s.logger.Info("Session output monitoring stopped", zap.String("session_id", session.ID))
 	}()
 
-	scanner := bufio.NewScanner(session.pty)
-	for scanner.Scan() {
+	// Use a buffer to read PTY output in chunks
+	buffer := make([]byte, 4096)
+	
+	for {
 		select {
 		case <-session.ctx.Done():
 			return
 		default:
-			output := scanner.Text() + "\n"
+			// Set read timeout to avoid blocking indefinitely
+			session.pty.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
 			
-			// Write to buffer
-			session.outputBuf.Write([]byte(output))
-			
-			// Send to all connected WebSockets
-			session.connMu.RLock()
-			for conn := range session.connections {
-				msg := Message{
-					Type:      "output",
-					Data:      output,
-					Timestamp: time.Now(),
-					SessionID: session.ID,
+			n, err := session.pty.Read(buffer)
+			if err != nil {
+				if os.IsTimeout(err) {
+					continue // Timeout is expected, continue reading
 				}
-				if err := conn.WriteJSON(msg); err != nil {
-					s.logger.Error("Failed to send output to WebSocket", zap.Error(err))
+				if err == io.EOF {
+					s.logger.Info("PTY EOF reached", zap.String("session_id", session.ID))
+					return
 				}
+				s.logger.Error("Error reading from PTY", zap.Error(err), zap.String("session_id", session.ID))
+				session.Status = StatusError
+				return
 			}
-			session.connMu.RUnlock()
+			
+			if n > 0 {
+				output := buffer[:n]
+				
+				// Write to buffer
+				session.outputBuf.Write(output)
+				
+				// Send to all connected WebSockets
+				session.connMu.RLock()
+				for conn := range session.connections {
+					msg := Message{
+						Type:      "output",
+						Data:      string(output),
+						Timestamp: time.Now(),
+						SessionID: session.ID,
+					}
+					if err := conn.WriteJSON(msg); err != nil {
+						s.logger.Error("Failed to send output to WebSocket", zap.Error(err))
+						// Remove failed connection
+						delete(session.connections, conn)
+						conn.Close()
+					}
+				}
+				session.connMu.RUnlock()
+				
+				// Update last active time
+				session.LastActive = time.Now()
+			}
 		}
-	}
-
-	if err := scanner.Err(); err != nil && err != io.EOF {
-		s.logger.Error("Error reading from PTY", zap.Error(err))
-		session.Status = StatusError
 	}
 }
 
 func generateSessionID() string {
-	// Implementation would generate a unique session ID
-	return fmt.Sprintf("sess_%d", time.Now().UnixNano())
+	return fmt.Sprintf("sess_%d_%d", time.Now().Unix(), time.Now().UnixNano()%1000000)
 }

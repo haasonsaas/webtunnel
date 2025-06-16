@@ -5,7 +5,6 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/yourusername/webtunnel/internal/services/auth"
 	"go.uber.org/zap"
 	"golang.org/x/time/rate"
 )
@@ -77,7 +76,12 @@ func RateLimit(requestsPerMinute int) gin.HandlerFunc {
 	}
 }
 
-func JWTAuth(authService *auth.Service) gin.HandlerFunc {
+// AuthServiceInterface defines the contract for authentication services  
+type AuthServiceInterface interface {
+	ValidateToken(token string) (string, error)
+}
+
+func JWTAuth(authService AuthServiceInterface) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		token := c.GetHeader("Authorization")
 		if token == "" {

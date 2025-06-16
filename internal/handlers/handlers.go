@@ -23,11 +23,19 @@ func Health(c *gin.Context) {
 
 // Auth handlers
 type AuthHandler struct {
-	authService *auth.Service
+	authService AuthServiceInterface
 	logger      *zap.Logger
 }
 
-func NewAuth(authService *auth.Service, logger *zap.Logger) *AuthHandler {
+// AuthServiceInterface defines the contract for authentication services
+type AuthServiceInterface interface {
+	GenerateToken(userID, email, role string) (string, error)
+	ValidateToken(token string) (string, error)
+	AuthenticateUser(email, password string) (*auth.User, error)
+	GetUserByID(userID string) (*auth.User, error)
+}
+
+func NewAuth(authService AuthServiceInterface, logger *zap.Logger) *AuthHandler {
 	return &AuthHandler{
 		authService: authService,
 		logger:      logger,

@@ -460,28 +460,100 @@
                 const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
                 const wsUrl = `${protocol}//${window.location.host}/api/v1/sessions/${sessionId}/stream`;
 
+                this.appendToTerminal(`\nConnecting to WebSocket: ${wsUrl}\n`);
+
                 this.ws = new WebSocket(wsUrl);
 
                 this.ws.onopen = () => {
                     console.log('WebSocket connected');
+                    this.appendToTerminal('[WebSocket connected]\n');
+                    
+                    // Send initial resize to match terminal size
+                    this.sendResize();
+                    
+                    // Start keepalive ping
+                    this.startKeepAlive();
                 };
 
                 this.ws.onmessage = (event) => {
-                    const message = JSON.parse(event.data);
-                    if (message.type === 'output') {
-                        this.appendToTerminal(message.data);
+                    try {
+                        const message = JSON.parse(event.data);
+                        switch (message.type) {
+                            case 'output':
+                                this.appendToTerminal(message.data);
+                                break;
+                            case 'error':
+                                this.appendToTerminal(`\n[ERROR: ${message.data}]\n`);
+                                break;
+                            case 'pong':
+                                console.log('Received pong from server');
+                                break;
+                            default:
+                                console.log('Unknown message type:', message.type);
+                        }
+                    } catch (err) {
+                        console.error('Error parsing WebSocket message:', err);
+                        this.appendToTerminal('\n[WebSocket message parse error]\n');
                     }
                 };
 
-                this.ws.onclose = () => {
-                    console.log('WebSocket disconnected');
-                    this.appendToTerminal('\n[WebSocket disconnected]\n');
+                this.ws.onclose = (event) => {
+                    console.log('WebSocket disconnected', event.code, event.reason);
+                    this.appendToTerminal(`\n[WebSocket disconnected: ${event.code} ${event.reason}]\n`);
+                    this.stopKeepAlive();
+                    
+                    // Auto-reconnect after 3 seconds if connection was unexpected
+                    if (event.code !== 1000 && this.currentSession) {
+                        setTimeout(() => {
+                            if (this.currentSession && !this.ws || this.ws.readyState === WebSocket.CLOSED) {
+                                this.appendToTerminal('\n[Attempting to reconnect...]\n');
+                                this.connectWebSocket(this.currentSession.id);
+                            }
+                        }, 3000);
+                    }
                 };
 
                 this.ws.onerror = (error) => {
                     console.error('WebSocket error:', error);
-                    this.appendToTerminal('\n[WebSocket error]\n');
+                    this.appendToTerminal('\n[WebSocket error - check console for details]\n');
                 };
+            }
+
+            startKeepAlive() {
+                this.stopKeepAlive();
+                this.keepAliveInterval = setInterval(() => {
+                    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+                        this.ws.send(JSON.stringify({
+                            type: 'ping',
+                            timestamp: new Date().toISOString()
+                        }));
+                    }
+                }, 30000); // Ping every 30 seconds
+            }
+
+            stopKeepAlive() {
+                if (this.keepAliveInterval) {
+                    clearInterval(this.keepAliveInterval);
+                    this.keepAliveInterval = null;
+                }
+            }
+
+            sendResize() {
+                if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+                    // Estimate terminal size based on container
+                    const terminal = document.getElementById('terminal');
+                    const computedStyle = window.getComputedStyle(terminal);
+                    const fontSize = parseInt(computedStyle.fontSize) || 14;
+                    const lineHeight = parseInt(computedStyle.lineHeight) || fontSize * 1.2;
+                    
+                    const cols = Math.floor(terminal.clientWidth / (fontSize * 0.6)); // Rough char width
+                    const rows = Math.floor(terminal.clientHeight / lineHeight);
+                    
+                    this.ws.send(JSON.stringify({
+                        type: 'resize',
+                        data: JSON.stringify({ cols: Math.max(80, cols), rows: Math.max(24, rows) })
+                    }));
+                }
             }
 
             appendToTerminal(text) {
